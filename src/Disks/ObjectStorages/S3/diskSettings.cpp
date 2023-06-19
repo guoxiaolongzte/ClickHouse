@@ -129,7 +129,7 @@ std::unique_ptr<S3::Client> getClient(
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "S3 path must ends with '/', but '{}' doesn't.", uri.key);
 
     client_configuration.connectTimeoutMs = config.getUInt(config_prefix + ".connect_timeout_ms", 1000);
-    client_configuration.requestTimeoutMs = config.getUInt(config_prefix + ".request_timeout_ms", 30000);
+    client_configuration.requestTimeoutMs = config.getUInt(config_prefix + ".request_timeout_ms", 3000);
     client_configuration.maxConnections = config.getUInt(config_prefix + ".max_connections", 100);
     client_configuration.endpointOverride = uri.endpoint;
 
@@ -145,9 +145,8 @@ std::unique_ptr<S3::Client> getClient(
     HTTPHeaderEntries headers = S3::getHTTPHeaders(config_prefix, config);
     S3::ServerSideEncryptionKMSConfig sse_kms_config = S3::getSSEKMSConfig(config_prefix, config);
 
-    client_configuration.retryStrategy
-        = std::make_shared<Aws::Client::DefaultRetryStrategy>(
-            config.getUInt64(config_prefix + ".retry_attempts", settings.request_settings.retry_attempts));
+    UInt64 attempts = config.getUInt64(config_prefix + ".retry_attempts", settings.request_settings.retry_attempts);
+    client_configuration.retryStrategy = std::make_shared<Aws::Client::DefaultRetryStrategy>(std::max(static_cast<UInt64>(1), attempts) - 1);
 
     return S3::ClientFactory::instance().create(
         client_configuration,
