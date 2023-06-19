@@ -72,6 +72,10 @@ struct ZooKeeperRequest : virtual Request
 
     virtual void writeImpl(WriteBuffer &) const = 0;
     virtual void readImpl(ReadBuffer &) = 0;
+    virtual void readImplSpecial(ReadBuffer & buf)
+    {
+        readImpl(buf);
+    }
 
     virtual std::string toStringImpl() const { return ""; }
 
@@ -398,6 +402,7 @@ struct ZooKeeperCheckRequest : CheckRequest, ZooKeeperRequest
     OpNum getOpNum() const override { return not_exists ? OpNum::CheckNotExists : OpNum::Check; }
     void writeImpl(WriteBuffer & out) const override;
     void readImpl(ReadBuffer & in) override;
+    void readImplSpecial(ReadBuffer & in) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -406,6 +411,8 @@ struct ZooKeeperCheckRequest : CheckRequest, ZooKeeperRequest
     size_t bytesSize() const override { return CheckRequest::bytesSize() + sizeof(xid) + sizeof(has_watch); }
 
     void createLogElements(LogElements & elems) const override;
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperCheckResponse : CheckResponse, ZooKeeperResponse
@@ -485,6 +492,7 @@ struct ZooKeeperMultiRequest final : MultiRequest, ZooKeeperRequest
 
     void writeImpl(WriteBuffer & out) const override;
     void readImpl(ReadBuffer & in) override;
+    void readImplSpecial(ReadBuffer & in) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;

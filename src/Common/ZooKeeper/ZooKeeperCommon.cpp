@@ -409,9 +409,41 @@ void ZooKeeperCheckRequest::writeImpl(WriteBuffer & out) const
     Coordination::write(version, out);
 }
 
+void read(std::string_view & s, ReadBuffer & in)
+{
+    int32_t size = 0;
+    read(size, in);
+
+    if (size == -1)
+    {
+        /// It means that zookeeper node has NULL value. We will treat it like empty string.
+        return;
+    }
+
+    if (size < 0)
+        throw Exception("Negative size while reading string from ZooKeeper", Error::ZMARSHALLINGERROR);
+
+    if (size > MAX_STRING_OR_ARRAY_SIZE)
+        throw Exception("Too large string size while reading from ZooKeeper", Error::ZMARSHALLINGERROR);
+
+    auto available = in.available();
+    if (available < static_cast<size_t>(size))
+        throw Exception(
+            Error::ZMARSHALLINGERROR, "Buffer size read from Zookeeper is not big enough. Expected {}. Got {}", size, available);
+    
+    s = std::string_view{in.position(), static_cast<size_t>(size)};
+    in.ignore(size);
+}
+
 void ZooKeeperCheckRequest::readImpl(ReadBuffer & in)
 {
     Coordination::read(path, in);
+    Coordination::read(version, in);
+}
+
+void ZooKeeperCheckRequest::readImplSpecial(ReadBuffer & in)
+{
+    Coordination::read(path_view, in);
     Coordination::read(version, in);
 }
 
@@ -550,6 +582,35 @@ void ZooKeeperMultiRequest::readImpl(ReadBuffer & in)
 
         ZooKeeperRequestPtr request = ZooKeeperRequestFactory::instance().get(op_num);
         request->readImpl(in);
+        requests.push_back(request);
+
+        if (in.eof())
+            throw Exception("Not enough results received for multi transaction", Error::ZMARSHALLINGERROR);
+    }
+}
+
+void ZooKeeperMultiRequest::readImplSpecial(ReadBuffer & in)
+{
+    while (true)
+    {
+        OpNum op_num;
+        bool done;
+        int32_t error;
+        Coordination::read(op_num, in);
+        Coordination::read(done, in);
+        Coordination::read(error, in);
+
+        if (done)
+        {
+            if (op_num != OpNum::Error)
+                throw Exception("Unexpected op_num received at the end of results for multi transaction", Error::ZMARSHALLINGERROR);
+            if (error != -1)
+                throw Exception("Unexpected error value received at the end of results for multi transaction", Error::ZMARSHALLINGERROR);
+            break;
+        }
+
+        ZooKeeperRequestPtr request = ZooKeeperRequestFactory::instance().get(op_num);
+        request->readImplSpecial(in);
         requests.push_back(request);
 
         if (in.eof())

@@ -210,7 +210,7 @@ std::shared_ptr<KeeperStorage::RequestForSession> KeeperStateMachine::parseReque
 
     request_for_session->request = Coordination::ZooKeeperRequestFactory::instance().get(opnum);
     request_for_session->request->xid = xid;
-    request_for_session->request->readImpl(buffer);
+    request_for_session->request->readImplSpecial(buffer);
 
     using enum ZooKeeperLogSerializationVersion;
     ZooKeeperLogSerializationVersion version = INITIAL;
