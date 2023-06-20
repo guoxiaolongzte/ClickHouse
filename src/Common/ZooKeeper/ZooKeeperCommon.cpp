@@ -14,6 +14,37 @@
 namespace Coordination
 {
 
+namespace 
+{
+
+void readString(std::string_view & s, ReadBuffer & in)
+{
+    int32_t size = 0;
+    Coordination::read(size, in);
+
+    if (size == -1)
+    {
+        /// It means that zookeeper node has NULL value. We will treat it like empty string.
+        return;
+    }
+
+    if (size < 0)
+        throw Exception("Negative size while reading string from ZooKeeper", Error::ZMARSHALLINGERROR);
+
+    if (size > MAX_STRING_OR_ARRAY_SIZE)
+        throw Exception("Too large string size while reading from ZooKeeper", Error::ZMARSHALLINGERROR);
+
+    auto available = in.available();
+    if (available < static_cast<size_t>(size))
+        throw Exception(
+            Error::ZMARSHALLINGERROR, "Buffer size read from Zookeeper is not big enough. Expected {}. Got {}", size, available);
+    
+    s = std::string_view{in.position(), static_cast<size_t>(size)};
+    in.ignore(size);
+}
+
+}
+
 using namespace DB;
 
 void ZooKeeperResponse::write(WriteBuffer & out) const
@@ -151,6 +182,21 @@ void ZooKeeperCreateRequest::readImpl(ReadBuffer & in)
         is_sequential = true;
 }
 
+void ZooKeeperCreateRequest::readImplSpecial(ReadBuffer & in)
+{
+    readString(path_view, in);
+    readString(data_view, in);
+    Coordination::read(acls, in);
+
+    int32_t flags = 0;
+    Coordination::read(flags, in);
+
+    if (flags & 1)
+        is_ephemeral = true;
+    if (flags & 2)
+        is_sequential = true;
+}
+
 std::string ZooKeeperCreateRequest::toStringImpl() const
 {
     return fmt::format(
@@ -190,6 +236,12 @@ std::string ZooKeeperRemoveRequest::toStringImpl() const
 void ZooKeeperRemoveRequest::readImpl(ReadBuffer & in)
 {
     Coordination::read(path, in);
+    Coordination::read(version, in);
+}
+
+void ZooKeeperRemoveRequest::readImplSpecial(ReadBuffer & in)
+{
+    readString(path_view, in);
     Coordination::read(version, in);
 }
 
@@ -260,6 +312,13 @@ void ZooKeeperSetRequest::readImpl(ReadBuffer & in)
 {
     Coordination::read(path, in);
     Coordination::read(data, in);
+    Coordination::read(version, in);
+}
+
+void ZooKeeperSetRequest::readImplSpecial(ReadBuffer & in)
+{
+    readString(path_view, in);
+    readString(data_view, in);
     Coordination::read(version, in);
 }
 
@@ -409,32 +468,6 @@ void ZooKeeperCheckRequest::writeImpl(WriteBuffer & out) const
     Coordination::write(version, out);
 }
 
-void read(std::string_view & s, ReadBuffer & in)
-{
-    int32_t size = 0;
-    read(size, in);
-
-    if (size == -1)
-    {
-        /// It means that zookeeper node has NULL value. We will treat it like empty string.
-        return;
-    }
-
-    if (size < 0)
-        throw Exception("Negative size while reading string from ZooKeeper", Error::ZMARSHALLINGERROR);
-
-    if (size > MAX_STRING_OR_ARRAY_SIZE)
-        throw Exception("Too large string size while reading from ZooKeeper", Error::ZMARSHALLINGERROR);
-
-    auto available = in.available();
-    if (available < static_cast<size_t>(size))
-        throw Exception(
-            Error::ZMARSHALLINGERROR, "Buffer size read from Zookeeper is not big enough. Expected {}. Got {}", size, available);
-    
-    s = std::string_view{in.position(), static_cast<size_t>(size)};
-    in.ignore(size);
-}
-
 void ZooKeeperCheckRequest::readImpl(ReadBuffer & in)
 {
     Coordination::read(path, in);
@@ -443,7 +476,7 @@ void ZooKeeperCheckRequest::readImpl(ReadBuffer & in)
 
 void ZooKeeperCheckRequest::readImplSpecial(ReadBuffer & in)
 {
-    Coordination::read(path_view, in);
+    readString(path_view, in);
     Coordination::read(version, in);
 }
 

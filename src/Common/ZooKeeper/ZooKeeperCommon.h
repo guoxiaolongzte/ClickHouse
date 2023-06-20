@@ -209,6 +209,7 @@ struct ZooKeeperCreateRequest final : public CreateRequest, ZooKeeperRequest
     OpNum getOpNum() const override { return OpNum::Create; }
     void writeImpl(WriteBuffer & out) const override;
     void readImpl(ReadBuffer & in) override;
+    void readImplSpecial(ReadBuffer & in) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -217,6 +218,9 @@ struct ZooKeeperCreateRequest final : public CreateRequest, ZooKeeperRequest
     size_t bytesSize() const override { return CreateRequest::bytesSize() + sizeof(xid) + sizeof(has_watch); }
 
     void createLogElements(LogElements & elems) const override;
+
+    std::string_view path_view;
+    std::string_view data_view;
 };
 
 struct ZooKeeperCreateResponse final : CreateResponse, ZooKeeperResponse
@@ -240,6 +244,7 @@ struct ZooKeeperRemoveRequest final : RemoveRequest, ZooKeeperRequest
     OpNum getOpNum() const override { return OpNum::Remove; }
     void writeImpl(WriteBuffer & out) const override;
     void readImpl(ReadBuffer & in) override;
+    void readImplSpecial(ReadBuffer & in) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -248,6 +253,8 @@ struct ZooKeeperRemoveRequest final : RemoveRequest, ZooKeeperRequest
     size_t bytesSize() const override { return RemoveRequest::bytesSize() + sizeof(xid); }
 
     void createLogElements(LogElements & elems) const override;
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperRemoveResponse final : RemoveResponse, ZooKeeperResponse
@@ -321,6 +328,7 @@ struct ZooKeeperSetRequest final : SetRequest, ZooKeeperRequest
     OpNum getOpNum() const override { return OpNum::Set; }
     void writeImpl(WriteBuffer & out) const override;
     void readImpl(ReadBuffer & in) override;
+    void readImplSpecial(ReadBuffer & in) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
@@ -328,6 +336,9 @@ struct ZooKeeperSetRequest final : SetRequest, ZooKeeperRequest
     size_t bytesSize() const override { return SetRequest::bytesSize() + sizeof(xid); }
 
     void createLogElements(LogElements & elems) const override;
+
+    std::string_view path_view;
+    std::string_view data_view;
 };
 
 struct ZooKeeperSetResponse final : SetResponse, ZooKeeperResponse

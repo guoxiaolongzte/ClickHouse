@@ -8,6 +8,8 @@
 #include <base/defines.h>
 #include <base/errnoToString.h>
 #include <sys/mman.h>
+#include "Common/Exception.h"
+#include "Common/LoggingFormatStringHelpers.h"
 #include <Common/ProfileEvents.h>
 #include <Common/ZooKeeper/ZooKeeperCommon.h>
 #include <Common/ZooKeeper/ZooKeeperIO.h>
@@ -284,6 +286,8 @@ bool KeeperStateMachine::preprocess(const KeeperStorage::RequestForSession & req
 
 nuraft::ptr<nuraft::buffer> KeeperStateMachine::commit(const uint64_t log_idx, nuraft::buffer & data)
 {
+    try
+    {
     auto request_for_session = parseRequest(data, true);
     if (!request_for_session->zxid)
         request_for_session->zxid = log_idx;
@@ -343,6 +347,12 @@ nuraft::ptr<nuraft::buffer> KeeperStateMachine::commit(const uint64_t log_idx, n
     if (commit_callback)
         commit_callback(*request_for_session);
     return nullptr;
+    }
+    catch (...)
+    {
+        tryLogCurrentException(log);
+        throw;
+    }
 }
 
 bool KeeperStateMachine::apply_snapshot(nuraft::snapshot & s)

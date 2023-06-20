@@ -66,6 +66,7 @@ public:
 
         void recalculateSize();
 
+        std::string_view data_view;
     private:
         String data;
         ChildrenSet children{};
@@ -160,7 +161,8 @@ public:
         Coordination::Stat stat;
         bool is_sequental;
         Coordination::ACLs acls;
-        String data;
+        std::string_view data;
+        String path_storage;
     };
 
     struct RemoveNodeDelta
@@ -171,7 +173,7 @@ public:
 
     struct UpdateNodeDelta
     {
-        std::function<void(Node &)> update_fn;
+        std::function<void(Node &, bool)> update_fn;
         int32_t version{-1};
     };
 
@@ -207,13 +209,13 @@ public:
 
     struct Delta
     {
-        Delta(String path_, int64_t zxid_, Operation operation_) : path(std::move(path_)), zxid(zxid_), operation(std::move(operation_)) { }
+        Delta(std::string_view path_, int64_t zxid_, Operation operation_) : path(std::move(path_)), zxid(zxid_), operation(std::move(operation_)) { }
 
         Delta(int64_t zxid_, Coordination::Error error) : Delta("", zxid_, ErrorDelta{error}) { }
 
         Delta(int64_t zxid_, Operation subdelta) : Delta("", zxid_, subdelta) { }
 
-        String path;
+        std::string_view path;
         int64_t zxid;
         Operation operation;
     };
@@ -300,8 +302,8 @@ public:
             using is_transparent = void; // required to make find() work with different type than key_type
         };
 
-        mutable std::unordered_map<std::string, UncommittedNode, Hash, Equal> nodes;
-        std::unordered_map<std::string, std::list<const Delta *>, Hash, Equal> deltas_for_path;
+        mutable std::unordered_map<std::string_view, UncommittedNode, Hash, Equal> nodes;
+        std::unordered_map<std::string_view, std::list<const Delta *>, Hash, Equal> deltas_for_path;
 
         std::list<Delta> deltas;
         KeeperStorage & storage;
@@ -319,8 +321,8 @@ public:
     // Returns false if it failed to create the node, true otherwise
     // We don't care about the exact failure because we should've caught it during preprocessing
     bool createNode(
-        const std::string & path,
-        String data,
+        std::string_view path,
+        std::string_view data,
         const Coordination::Stat & stat,
         bool is_sequental,
         Coordination::ACLs node_acls);
@@ -328,11 +330,11 @@ public:
     // Remove node in the storage
     // Returns false if it failed to remove the node, true otherwise
     // We don't care about the exact failure because we should've caught it during preprocessing
-    bool removeNode(const std::string & path, int32_t version);
+    bool removeNode(std::string_view path, int32_t version);
 
     bool checkACL(StringRef path, int32_t permissions, int64_t session_id, bool is_local);
 
-    void unregisterEphemeralPath(int64_t session_id, const std::string & path);
+    void unregisterEphemeralPath(int64_t session_id, std::string_view path);
 
     /// Mapping session_id -> set of ephemeral nodes paths
     Ephemerals ephemerals;
