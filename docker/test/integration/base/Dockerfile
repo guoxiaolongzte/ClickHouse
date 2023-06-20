@@ -46,7 +46,7 @@ RUN arch=${TARGETARCH:-amd64} \
       arm64) rarch=aarch64 ;; \
     esac \
   && cd /tmp \
-  && curl -o mysql-odbc.rpm "https://cdn.mysql.com/archives/mysql-connector-odbc-8.0/mysql-connector-odbc-8.0.27-1.el8.${rarch}.rpm" \
+  && curl -o mysql-odbc.rpm "https://cdn.mysql.com/archives/mysql-connector-odbc-8.0/mysql-connector-odbc-8.0.32-1.el9.${rarch}.rpm" \
   && rpm2archive mysql-odbc.rpm \
   && tar xf mysql-odbc.rpm.tgz -C / ./usr/lib64/ \
   && rm mysql-odbc.rpm mysql-odbc.rpm.tgz \
