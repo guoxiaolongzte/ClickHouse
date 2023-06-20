@@ -19,7 +19,7 @@ namespace DB
 struct KeeperStorageRequestProcessor;
 using KeeperStorageRequestProcessorPtr = std::shared_ptr<KeeperStorageRequestProcessor>;
 using ResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr &)>;
-using ChildrenSet = absl::flat_hash_set<StringRef, StringRefHash>;
+using ChildrenSet = absl::flat_hash_set<std::string_view, DefaultHash<std::string_view>>;
 using SessionAndTimeout = std::unordered_map<int64_t, int64_t>;
 
 struct KeeperStorageSnapshot;
@@ -29,6 +29,16 @@ struct KeeperStorageSnapshot;
 /// In-memory and not thread safe.
 class KeeperStorage
 {
+    struct TransparentStringEqual
+    {
+        auto operator()(const std::string_view a,
+                        const std::string_view b) const
+        {
+            return a == b;
+        }
+
+        using is_transparent = void; // required to make find() work with different type than key_type
+    };
 public:
     struct Node
     {
@@ -45,11 +55,11 @@ public:
 
         void setData(String new_data);
 
-        const auto & getData() const noexcept { return data; }
+        std::string_view getData() const noexcept { return data_view.empty() ? data : data_view; }
 
-        void addChild(StringRef child_path, bool update_size = true);
+        void addChild(std::string_view child_path, bool update_size = true);
 
-        void removeChild(StringRef child_path);
+        void removeChild(std::string_view child_path);
 
         const auto & getChildren() const noexcept { return children; }
 
@@ -128,14 +138,14 @@ public:
     using RequestsForSessions = std::vector<RequestForSession>;
 
     using Container = SnapshotableHashTable<Node>;
-    using Ephemerals = std::unordered_map<int64_t, std::unordered_set<std::string>>;
+    using Ephemerals = std::unordered_map<int64_t, std::unordered_set<std::string, DefaultHash<std::string_view>, TransparentStringEqual>>;
     using SessionAndWatcher = std::unordered_map<int64_t, std::unordered_set<std::string>>;
     using SessionIDs = std::unordered_set<int64_t>;
 
     /// Just vector of SHA1 from user:password
     using AuthIDs = std::vector<AuthID>;
     using SessionAndAuth = std::unordered_map<int64_t, AuthIDs>;
-    using Watches = std::map<String /* path, relative of root_path */, SessionIDs>;
+    using Watches = std::unordered_map<String /* path, relative of root_path */, SessionIDs,  DefaultHash<std::string_view>, TransparentStringEqual>;
 
     int64_t session_id_counter{1};
 
@@ -162,7 +172,6 @@ public:
         bool is_sequental;
         Coordination::ACLs acls;
         std::string_view data;
-        String path_storage;
     };
 
     struct RemoveNodeDelta
@@ -209,13 +218,23 @@ public:
 
     struct Delta
     {
-        Delta(std::string_view path_, int64_t zxid_, Operation operation_) : path(std::move(path_)), zxid(zxid_), operation(std::move(operation_)) { }
+        Delta(std::string_view path_, int64_t zxid_, Operation operation_, std::string path_storage_ = "")
+            : path(std::move(path_)), path_storage(std::move(path_storage_)), zxid(zxid_), operation(std::move(operation_))
+        {
+        }
 
-        Delta(int64_t zxid_, Coordination::Error error) : Delta("", zxid_, ErrorDelta{error}) { }
+        Delta(std::string path_, int64_t zxid_, Operation operation_)
+            : path_storage(std::move(path_)), zxid(zxid_), operation(std::move(operation_))
+        {
+            path = path_storage;
+        }
 
-        Delta(int64_t zxid_, Operation subdelta) : Delta("", zxid_, subdelta) { }
+        Delta(int64_t zxid_, Coordination::Error error) : Delta(std::string_view{""}, zxid_, ErrorDelta{error}) { }
+
+        Delta(int64_t zxid_, Operation subdelta) : Delta(std::string_view{""}, zxid_, subdelta) { }
 
         std::string_view path;
+        std::string path_storage;
         int64_t zxid;
         Operation operation;
     };
@@ -229,8 +248,8 @@ public:
         void commit(int64_t commit_zxid);
         void rollback(int64_t rollback_zxid);
 
-        std::shared_ptr<Node> getNode(StringRef path) const;
-        Coordination::ACLs getACLs(StringRef path) const;
+        std::shared_ptr<Node> getNode(std::string_view path) const;
+        Coordination::ACLs getACLs(std::string_view path) const;
 
         void applyDelta(const Delta & delta);
 
@@ -270,7 +289,7 @@ public:
 
         void forEachAuthInSession(int64_t session_id, std::function<void(const AuthID &)> func) const;
 
-        std::shared_ptr<Node> tryGetNodeFromStorage(StringRef path) const;
+        std::shared_ptr<Node> tryGetNodeFromStorage(std::string_view path) const;
 
         std::unordered_map<int64_t, std::list<const AuthID *>> session_and_auth;
 
@@ -281,29 +300,8 @@ public:
             int64_t zxid{0};
         };
 
-        struct Hash
-        {
-            uint64_t operator()(const std::string_view view) const
-            {
-                return StringRefHash()(StringRef{view});
-            }
-
-            using is_transparent = void; // required to make find() work with different type than key_type
-        };
-
-        struct Equal
-        {
-            auto operator()(const std::string_view a,
-                            const std::string_view b) const
-            {
-                return a == b;
-            }
-
-            using is_transparent = void; // required to make find() work with different type than key_type
-        };
-
-        mutable std::unordered_map<std::string_view, UncommittedNode, Hash, Equal> nodes;
-        std::unordered_map<std::string_view, std::list<const Delta *>, Hash, Equal> deltas_for_path;
+        mutable std::unordered_map<std::string_view, UncommittedNode, DefaultHash<std::string_view>, TransparentStringEqual> nodes;
+        std::unordered_map<std::string_view, std::list<const Delta *>, DefaultHash<std::string_view>, TransparentStringEqual> deltas_for_path;
 
         std::list<Delta> deltas;
         KeeperStorage & storage;
@@ -332,7 +330,7 @@ public:
     // We don't care about the exact failure because we should've caught it during preprocessing
     bool removeNode(std::string_view path, int32_t version);
 
-    bool checkACL(StringRef path, int32_t permissions, int64_t session_id, bool is_local);
+    bool checkACL(std::string_view path, int32_t permissions, int64_t session_id, bool is_local);
 
     void unregisterEphemeralPath(int64_t session_id, std::string_view path);
 

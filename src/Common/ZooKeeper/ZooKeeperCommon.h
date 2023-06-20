@@ -66,16 +66,14 @@ struct ZooKeeperRequest : virtual Request
 
     virtual OpNum getOpNum() const = 0;
 
+    virtual std::string_view getPathView() const = 0;
+
     /// Writes length, xid, op_num, then the rest.
     void write(WriteBuffer & out) const;
     std::string toString() const;
 
     virtual void writeImpl(WriteBuffer &) const = 0;
-    virtual void readImpl(ReadBuffer &) = 0;
-    virtual void readImplSpecial(ReadBuffer & buf)
-    {
-        readImpl(buf);
-    }
+    virtual void readImpl(ReadBuffer &, bool use_buffer_memory) = 0;
 
     virtual std::string toStringImpl() const { return ""; }
 
@@ -93,9 +91,11 @@ using ZooKeeperRequestPtr = std::shared_ptr<ZooKeeperRequest>;
 struct ZooKeeperHeartbeatRequest final : ZooKeeperRequest
 {
     String getPath() const override { return {}; }
+    std::string_view getPathView() const override { return {}; }
+
     OpNum getOpNum() const override { return OpNum::Heartbeat; }
     void writeImpl(WriteBuffer &) const override {}
-    void readImpl(ReadBuffer &) override {}
+    void readImpl(ReadBuffer &, bool /*use_buffer_memory*/) override {}
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
 };
@@ -103,10 +103,14 @@ struct ZooKeeperHeartbeatRequest final : ZooKeeperRequest
 struct ZooKeeperSyncRequest final : ZooKeeperRequest
 {
     String path;
+    std::string_view path_view;
+
     String getPath() const override { return path; }
+    std::string_view getPathView() const override { return path_view; }
+
     OpNum getOpNum() const override { return OpNum::Sync; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
@@ -150,12 +154,15 @@ struct ZooKeeperAuthRequest final : ZooKeeperRequest
 {
     int32_t type = 0;   /// ignored by the server
     String scheme;
+    std::string_view scheme_view;
     String data;
+    std::string_view data_view;
 
     String getPath() const override { return {}; }
+    std::string_view getPathView() const override { return {}; }
     OpNum getOpNum() const override { return OpNum::Auth; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -178,9 +185,10 @@ struct ZooKeeperAuthResponse final : ZooKeeperResponse
 struct ZooKeeperCloseRequest final : ZooKeeperRequest
 {
     String getPath() const override { return {}; }
+    std::string_view getPathView() const override { return {}; }
     OpNum getOpNum() const override { return OpNum::Close; }
     void writeImpl(WriteBuffer &) const override {}
-    void readImpl(ReadBuffer &) override {}
+    void readImpl(ReadBuffer &, bool /*use_buffer_memory*/) override {}
 
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
@@ -206,10 +214,11 @@ struct ZooKeeperCreateRequest final : public CreateRequest, ZooKeeperRequest
     ZooKeeperCreateRequest() = default;
     explicit ZooKeeperCreateRequest(const CreateRequest & base) : CreateRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::Create; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
-    void readImplSpecial(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -241,10 +250,11 @@ struct ZooKeeperRemoveRequest final : RemoveRequest, ZooKeeperRequest
     ZooKeeperRemoveRequest() = default;
     explicit ZooKeeperRemoveRequest(const RemoveRequest & base) : RemoveRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::Remove; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
-    void readImplSpecial(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -271,15 +281,19 @@ struct ZooKeeperExistsRequest final : ExistsRequest, ZooKeeperRequest
     ZooKeeperExistsRequest() = default;
     explicit ZooKeeperExistsRequest(const ExistsRequest & base) : ExistsRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::Exists; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return true; }
 
     size_t bytesSize() const override { return ExistsRequest::bytesSize() + sizeof(xid) + sizeof(has_watch); }
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperExistsResponse final : ExistsResponse, ZooKeeperResponse
@@ -298,15 +312,19 @@ struct ZooKeeperGetRequest final : GetRequest, ZooKeeperRequest
     ZooKeeperGetRequest() = default;
     explicit ZooKeeperGetRequest(const GetRequest & base) : GetRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::Get; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return true; }
 
     size_t bytesSize() const override { return GetRequest::bytesSize() + sizeof(xid) + sizeof(has_watch); }
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperGetResponse final : GetResponse, ZooKeeperResponse
@@ -325,10 +343,11 @@ struct ZooKeeperSetRequest final : SetRequest, ZooKeeperRequest
     ZooKeeperSetRequest() = default;
     explicit ZooKeeperSetRequest(const SetRequest & base) : SetRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::Set; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
-    void readImplSpecial(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
@@ -357,14 +376,18 @@ struct ZooKeeperListRequest : ListRequest, ZooKeeperRequest
     ZooKeeperListRequest() = default;
     explicit ZooKeeperListRequest(const ListRequest & base) : ListRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::List; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return true; }
 
     size_t bytesSize() const override { return ListRequest::bytesSize() + sizeof(xid) + sizeof(has_watch); }
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperSimpleListRequest final : ZooKeeperListRequest
@@ -379,7 +402,7 @@ struct ZooKeeperFilteredListRequest final : ZooKeeperListRequest
 
     OpNum getOpNum() const override { return OpNum::FilteredList; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     size_t bytesSize() const override { return ZooKeeperListRequest::bytesSize() + sizeof(list_request_type); }
@@ -410,10 +433,11 @@ struct ZooKeeperCheckRequest : CheckRequest, ZooKeeperRequest
     ZooKeeperCheckRequest() = default;
     explicit ZooKeeperCheckRequest(const CheckRequest & base) : CheckRequest(base) {}
 
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return not_exists ? OpNum::CheckNotExists : OpNum::Check; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
-    void readImplSpecial(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -454,14 +478,18 @@ struct ZooKeeperErrorResponse final : ErrorResponse, ZooKeeperResponse
 
 struct ZooKeeperSetACLRequest final : SetACLRequest, ZooKeeperRequest
 {
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::SetACL; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }
 
     size_t bytesSize() const override { return SetACLRequest::bytesSize() + sizeof(xid); }
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperSetACLResponse final : SetACLResponse, ZooKeeperResponse
@@ -475,14 +503,18 @@ struct ZooKeeperSetACLResponse final : SetACLResponse, ZooKeeperResponse
 
 struct ZooKeeperGetACLRequest final : GetACLRequest, ZooKeeperRequest
 {
+    std::string_view getPathView() const override { return path_view.empty() ? path : path_view; }
+
     OpNum getOpNum() const override { return OpNum::GetACL; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
     ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return true; }
 
     size_t bytesSize() const override { return GetACLRequest::bytesSize() + sizeof(xid); }
+
+    std::string_view path_view;
 };
 
 struct ZooKeeperGetACLResponse final : GetACLResponse, ZooKeeperResponse
@@ -496,14 +528,15 @@ struct ZooKeeperGetACLResponse final : GetACLResponse, ZooKeeperResponse
 
 struct ZooKeeperMultiRequest final : MultiRequest, ZooKeeperRequest
 {
+    std::string_view getPathView() const override { return {}; }
+
     OpNum getOpNum() const override;
     ZooKeeperMultiRequest() = default;
 
     ZooKeeperMultiRequest(const Requests & generic_requests, const ACLs & default_acls);
 
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
-    void readImplSpecial(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
     std::string toStringImpl() const override;
 
     ZooKeeperResponsePtr makeResponse() const override;
@@ -570,9 +603,10 @@ struct ZooKeeperSessionIDRequest final : ZooKeeperRequest
     int32_t server_id;
 
     Coordination::OpNum getOpNum() const override { return OpNum::SessionID; }
+    std::string_view getPathView() const override { return {}; }
     String getPath() const override { return {}; }
     void writeImpl(WriteBuffer & out) const override;
-    void readImpl(ReadBuffer & in) override;
+    void readImpl(ReadBuffer & in, bool use_buffer_memory) override;
 
     Coordination::ZooKeeperResponsePtr makeResponse() const override;
     bool isReadRequest() const override { return false; }

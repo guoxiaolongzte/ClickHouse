@@ -1,13 +1,11 @@
 #pragma once
 
 #include <string>
-#include <base/StringRef.h>
-
 namespace DB
 {
 
-StringRef parentPath(StringRef path);
+std::string_view parentPath(std::string_view path);
 
-StringRef getBaseName(StringRef path);
+std::string_view getBaseName(std::string_view path);
 
 }

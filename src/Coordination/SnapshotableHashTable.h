@@ -1,5 +1,4 @@
 #pragma once
-#include <base/StringRef.h>
 #include <Common/HashTable/HashMap.h>
 #include <Common/ArenaWithFreeLists.h>
 #include <Common/ArenaUtils.h>
@@ -14,7 +13,7 @@ namespace DB
 template<typename V>
 struct ListNode
 {
-    StringRef key;
+    std::string_view key;
     V value;
 
     /// Monotonically increasing version info for snapshot
@@ -31,7 +30,7 @@ private:
     using ListElem = ListNode<V>;
     using List = std::list<ListElem>;
     using Mapped = typename List::iterator;
-    using IndexMap = HashMap<StringRef, Mapped>;
+    using IndexMap = HashMap<std::string_view, Mapped>;
 
     List list;
     IndexMap map;
@@ -125,21 +124,21 @@ public:
     using const_iterator = typename List::const_iterator;
     using ValueUpdater = std::function<void(V & value)>;
 
-    std::pair<typename IndexMap::LookupResult, bool> insert(const StringRef key, const V & value)
+    std::pair<typename IndexMap::LookupResult, bool> insert(const std::string_view key, const V & value)
     {
         size_t hash_value = map.hash(key);
         auto it = map.find(key, hash_value);
 
         if (!it)
         {
-            ListElem elem{copyStringInArena(arena, key), value, current_version};
+            ListElem elem{copyStringInArena(arena, StringRef{key}).toView(), value, current_version};
             auto itr = list.insert(list.end(), std::move(elem));
             bool inserted;
             map.emplace(itr->key, it, inserted, hash_value);
             assert(inserted);
 
             it->getMapped() = itr;
-            updateDataSize(INSERT, key.size, value.sizeInBytes(), 0);
+            updateDataSize(INSERT, key.size(), value.sizeInBytes(), 0);
             return std::make_pair(it, true);
         }
 
@@ -154,7 +153,7 @@ public:
 
         if (it == map.end())
         {
-            ListElem elem{copyStringInArena(arena, key), value, current_version};
+            ListElem elem{copyStringInArena(arena, StringRef{key}).toView(), value, current_version};
             auto itr = list.insert(list.end(), std::move(elem));
             bool inserted;
             map.emplace(itr->key, it, inserted, hash_value);
@@ -180,7 +179,7 @@ public:
         updateDataSize(INSERT_OR_REPLACE, key.size(), value.sizeInBytes(), old_value_size, !snapshot_mode);
     }
 
-    bool erase(StringRef key)
+    bool erase(std::string_view key)
     {
         auto it = map.find(key);
         if (it == map.end())
@@ -198,20 +197,20 @@ public:
         else
         {
             map.erase(it->getKey());
-            arena.free(const_cast<char *>(list_itr->key.data), list_itr->key.size);
+            arena.free(const_cast<char *>(list_itr->key.data()), list_itr->key.size());
             list.erase(list_itr);
         }
 
-        updateDataSize(ERASE, key.size, 0, old_data_size, !snapshot_mode);
+        updateDataSize(ERASE, key.size(), 0, old_data_size, !snapshot_mode);
         return true;
     }
 
-    bool contains(const StringRef key) const
+    bool contains(const std::string_view key) const
     {
         return map.find(key) != map.end();
     }
 
-    const_iterator updateValue(StringRef key, ValueUpdater updater)
+    const_iterator updateValue(std::string_view key, ValueUpdater updater)
     {
         size_t hash_value = map.hash(key);
         auto it = map.find(key, hash_value);
@@ -253,11 +252,11 @@ public:
             ret = list_itr;
         }
 
-        updateDataSize(UPDATE_VALUE, key.size, ret->value.sizeInBytes(), old_value_size, remove_old_size);
+        updateDataSize(UPDATE_VALUE, key.size(), ret->value.sizeInBytes(), old_value_size, remove_old_size);
         return ret;
     }
 
-    const_iterator find(StringRef key) const
+    const_iterator find(std::string_view key) const
     {
         auto map_it = map.find(key);
         if (map_it != map.end())
@@ -266,7 +265,7 @@ public:
     }
 
 
-    const V & getValue(StringRef key) const
+    const V & getValue(std::string_view key) const
     {
         auto it = map.find(key);
         assert(it);
@@ -278,9 +277,9 @@ public:
         for (auto & itr: snapshot_invalid_iters)
         {
             assert(!itr->active_in_map);
-            updateDataSize(CLEAR_OUTDATED_NODES, itr->key.size, itr->value.sizeInBytes(), 0);
+            updateDataSize(CLEAR_OUTDATED_NODES, itr->key.size(), itr->value.sizeInBytes(), 0);
             if (itr->free_key)
-                arena.free(const_cast<char *>(itr->key.data), itr->key.size);
+                arena.free(const_cast<char *>(itr->key.data()), itr->key.size());
             list.erase(itr);
         }
         snapshot_invalid_iters.clear();
@@ -290,7 +289,7 @@ public:
     {
         map.clear();
         for (auto itr = list.begin(); itr != list.end(); ++itr)
-            arena.free(const_cast<char *>(itr->key.data), itr->key.size);
+            arena.free(const_cast<char *>(itr->key.data()), itr->key.size());
         list.clear();
         updateDataSize(CLEAR, 0, 0, 0);
     }
@@ -328,7 +327,7 @@ public:
         for (auto & node : list)
         {
             node.value.recalculateSize();
-            approximate_data_size += node.key.size;
+            approximate_data_size += node.key.size();
             approximate_data_size += node.value.sizeInBytes();
         }
     }

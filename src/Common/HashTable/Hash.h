@@ -541,3 +541,14 @@ struct IntHash32
 
 template <>
 struct DefaultHash<StringRef> : public StringRefHash {};
+
+template<>
+struct DefaultHash<std::string_view>
+{
+    size_t operator() (std::string_view key) const
+    {
+        return StringRefHash{}(StringRef{key});
+    }
+
+    using is_transparent = void; // required to make find() work with different type than key_type
+};
