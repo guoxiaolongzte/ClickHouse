@@ -54,10 +54,10 @@ namespace ErrorCodes
 namespace
 {
 
-String getSHA1(const String & userdata)
+String getSHA1(std::string_view userdata)
 {
     Poco::SHA1Engine engine;
-    engine.update(userdata);
+    engine.update(userdata.data(), userdata.size());
     const auto & digest_id = engine.digest();
     return String{digest_id.begin(), digest_id.end()};
 }
@@ -410,7 +410,7 @@ void KeeperStorage::UncommittedState::commit(int64_t commit_zxid)
     auto delta_it = deltas.begin();
     for (; delta_it != deltas.end() && delta_it->zxid == commit_zxid; ++delta_it)
     {
-        if (std::holds_alternative<SubDeltaEnd>(deltas.front().operation))
+        if (std::holds_alternative<SubDeltaEnd>(delta_it->operation))
         {
             ++delta_it;
             break;
@@ -443,7 +443,6 @@ void KeeperStorage::UncommittedState::commit(int64_t commit_zxid)
             uncommitted_auth.pop_front();
             if (uncommitted_auth.empty())
                 session_and_auth.erase(add_auth->session_id);
-
         }
     }
 
@@ -458,7 +457,7 @@ void KeeperStorage::UncommittedState::commit(int64_t commit_zxid)
     if (delta_it == deltas.end())
         deltas.clear();
     else
-        deltas.erase(delta_it, deltas.end());
+        deltas.erase(deltas.begin(), delta_it);
 }
 
 void KeeperStorage::UncommittedState::rollback(int64_t rollback_zxid)
@@ -960,19 +959,20 @@ struct KeeperStorageCreateRequestProcessor final : public KeeperStorageRequestPr
         else if (parent_node->stat.ephemeralOwner != 0)
             return {KeeperStorage::Delta{zxid, Coordination::Error::ZNOCHILDRENFOREPHEMERALS}};
 
-        std::string path_storage;
+        std::shared_ptr<std::string> path_storage;
         std::string_view path_created{request.getPathView()};
+
         if (request.is_sequential)
         {
-            path_storage = std::string{request.getPathView()};
+            path_storage = std::make_shared<std::string>(request.getPathView());
             auto seq_num = parent_node->seq_num;
 
             std::stringstream seq_num_str; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
             seq_num_str.exceptions(std::ios::failbit);
             seq_num_str << std::setw(10) << std::setfill('0') << seq_num;
 
-            path_storage += seq_num_str.str();
-            path_created = path_storage;
+            *path_storage += seq_num_str.str();
+            path_created = *path_storage;
         }
 
         if (Coordination::matchPath(path_created, keeper_system_path) != Coordination::PathMatchResult::NOT_MATCH)
@@ -1055,7 +1055,10 @@ struct KeeperStorageCreateRequestProcessor final : public KeeperStorageRequestPr
             [zxid](const auto & delta)
             { return delta.zxid == zxid && std::holds_alternative<KeeperStorage::CreateNodeDelta>(delta.operation); });
 
-        response.path_created = create_delta_it->path;
+
+        chassert(create_delta_it != deltas.end());
+
+        response.path_created = std::string{create_delta_it->path};
         response.error = Coordination::Error::ZOK;
         return response_ptr;
     }
@@ -1205,7 +1208,7 @@ struct KeeperStorageRemoveRequestProcessor final : public KeeperStorageRequestPr
         new_deltas.emplace_back(request.getPathView(), zxid, KeeperStorage::RemoveNodeDelta{request.version, node->stat.ephemeralOwner});
 
         if (node->stat.ephemeralOwner != 0)
-            storage.unregisterEphemeralPath(node->stat.ephemeralOwner, request.path);
+            storage.unregisterEphemeralPath(node->stat.ephemeralOwner, request.getPathView());
 
         digest = storage.calculateNodesDigest(digest, new_deltas);
 
@@ -1340,7 +1343,7 @@ struct KeeperStorageSetRequestProcessor final : public KeeperStorageRequestProce
                 request.version});
 
         new_deltas.emplace_back(
-                parentPath(request.path_view),
+                parentPath(request.getPathView()),
                 zxid,
                 KeeperStorage::UpdateNodeDelta
                 {
@@ -1925,11 +1928,11 @@ struct KeeperStorageAuthRequestProcessor final : public KeeperStorageRequestProc
         Coordination::ZooKeeperAuthRequest & auth_request = dynamic_cast<Coordination::ZooKeeperAuthRequest &>(*zk_request);
         Coordination::ZooKeeperResponsePtr response_ptr = zk_request->makeResponse();
 
-        if (auth_request.scheme != "digest" || std::count(auth_request.data.begin(), auth_request.data.end(), ':') != 1)
+        if (auth_request.scheme_view != "digest" || std::count(auth_request.data_view.begin(), auth_request.data_view.end(), ':') != 1)
             return {KeeperStorage::Delta{zxid, Coordination::Error::ZAUTHFAILED}};
 
         std::vector<KeeperStorage::Delta> new_deltas;
-        auto auth_digest = KeeperStorage::generateDigest(auth_request.data);
+        auto auth_digest = KeeperStorage::generateDigest(auth_request.data_view);
         if (auth_digest == storage.superdigest)
         {
             KeeperStorage::AuthID auth{"super", ""};
@@ -1937,7 +1940,7 @@ struct KeeperStorageAuthRequestProcessor final : public KeeperStorageRequestProc
         }
         else
         {
-            KeeperStorage::AuthID new_auth{auth_request.scheme, auth_digest};
+            KeeperStorage::AuthID new_auth{auth_request.scheme_view, auth_digest};
             if (!storage.uncommitted_state.hasACL(session_id, false, [&](const auto & auth_id) { return new_auth == auth_id; }))
                 new_deltas.emplace_back(zxid, KeeperStorage::AddAuthDelta{session_id, std::move(new_auth)});
         }
@@ -2160,10 +2163,10 @@ void KeeperStorage::preprocessRequest(
         {
             for (const auto & ephemeral_path : session_ephemerals->second)
             {
-                std::string parent_path{parentPath(ephemeral_path)};
+                auto parent_path = std::make_shared<std::string>(parentPath(ephemeral_path));
                 new_deltas.emplace_back
                 (
-                    parent_path,
+                    *parent_path,
                     new_last_zxid,
                     UpdateNodeDelta
                     {
@@ -2515,7 +2518,7 @@ void KeeperStorage::recalculateStats()
     container.recalculateDataSize();
 }
 
-String KeeperStorage::generateDigest(const String & userdata)
+String KeeperStorage::generateDigest(std::string_view userdata)
 {
     std::vector<String> user_password;
     boost::split(user_password, userdata, [](char character) { return character == ':'; });

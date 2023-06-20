@@ -103,7 +103,7 @@ TEST_P(CoordinationTest, BufferSerde)
 
     Coordination::ZooKeeperRequestPtr request_read = Coordination::ZooKeeperRequestFactory::instance().get(opnum);
     request_read->xid = xid;
-    request_read->readImpl(rbuf);
+    request_read->readImpl(rbuf, /*use_buffer_memory=*/false);
 
     EXPECT_EQ(request_read->getOpNum(), Coordination::OpNum::Get);
     EXPECT_EQ(request_read->xid, 3);
@@ -1132,24 +1132,24 @@ TEST_P(CoordinationTest, SnapshotableHashMapDataSize)
 
     world.disableSnapshotMode();
     world.insert("world", n1);
-    EXPECT_EQ(world.getApproximateDataSize(), 193);
+    EXPECT_EQ(world.getApproximateDataSize(), 209);
     world.updateValue("world", [&](Node & value) { value = n2; });
-    EXPECT_EQ(world.getApproximateDataSize(), 211);
+    EXPECT_EQ(world.getApproximateDataSize(), 227);
 
     world.erase("world");
     EXPECT_EQ(world.getApproximateDataSize(), 0);
 
     world.enableSnapshotMode(100000);
     world.insert("world", n1);
-    EXPECT_EQ(world.getApproximateDataSize(), 193);
+    EXPECT_EQ(world.getApproximateDataSize(), 209);
     world.updateValue("world", [&](Node & value) { value = n2; });
-    EXPECT_EQ(world.getApproximateDataSize(), 404);
+    EXPECT_EQ(world.getApproximateDataSize(), 436);
 
     world.clearOutdatedNodes();
-    EXPECT_EQ(world.getApproximateDataSize(), 211);
+    EXPECT_EQ(world.getApproximateDataSize(), 227);
 
     world.erase("world");
-    EXPECT_EQ(world.getApproximateDataSize(), 211);
+    EXPECT_EQ(world.getApproximateDataSize(), 227);
 
     world.clear();
     EXPECT_EQ(world.getApproximateDataSize(), 0);
@@ -1164,7 +1164,7 @@ void addNode(DB::KeeperStorage & storage, const std::string & path, const std::s
     storage.container.insertOrReplace(path, node);
     auto child_it = storage.container.find(path);
     auto child_path = DB::getBaseName(child_it->key);
-    storage.container.updateValue(DB::parentPath(StringRef{path}), [&](auto & parent)
+    storage.container.updateValue(DB::parentPath(std::string_view{path}), [&](auto & parent)
     {
         parent.addChild(child_path);
         parent.stat.numChildren++;
@@ -2083,12 +2083,12 @@ TEST_P(CoordinationTest, TestUncommittedStateBasicCrud)
 
     DB::KeeperStorage storage{500, "", keeper_context};
 
-    constexpr std::string_view path = "/test";
+    static constexpr std::string_view path = "/test";
 
     const auto get_committed_data = [&]() -> std::optional<String>
     {
         auto request = std::make_shared<ZooKeeperGetRequest>();
-        request->path = path;
+        request->path_view = path;
         auto responses = storage.processRequest(request, 0, std::nullopt, true, true);
         const auto & get_response = getSingleResponse<ZooKeeperGetResponse>(responses);
 
@@ -2101,14 +2101,14 @@ TEST_P(CoordinationTest, TestUncommittedStateBasicCrud)
     const auto preprocess_get = [&](int64_t zxid)
     {
         auto get_request = std::make_shared<ZooKeeperGetRequest>();
-        get_request->path = path;
+        get_request->path_view = path;
         storage.preprocessRequest(get_request, 0, 0, zxid);
         return get_request;
     };
 
     const auto create_request = std::make_shared<ZooKeeperCreateRequest>();
-    create_request->path = path;
-    create_request->data = "initial_data";
+    create_request->path_view = path;
+    create_request->data_view = "initial_data";
     storage.preprocessRequest(create_request, 0, 0, 1);
     storage.preprocessRequest(create_request, 0, 0, 2);
 
@@ -2119,8 +2119,8 @@ TEST_P(CoordinationTest, TestUncommittedStateBasicCrud)
     ASSERT_FALSE(get_committed_data());
 
     const auto set_request = std::make_shared<ZooKeeperSetRequest>();
-    set_request->path = path;
-    set_request->data = "new_data";
+    set_request->path_view = path;
+    set_request->data_view = "new_data";
     storage.preprocessRequest(set_request, 0, 0, 4);
 
     const auto after_set_get = preprocess_get(5);
@@ -2128,7 +2128,7 @@ TEST_P(CoordinationTest, TestUncommittedStateBasicCrud)
     ASSERT_FALSE(get_committed_data());
 
     const auto remove_request = std::make_shared<ZooKeeperRemoveRequest>();
-    remove_request->path = path;
+    remove_request->path_view = path;
     storage.preprocessRequest(remove_request, 0, 0, 6);
     storage.preprocessRequest(remove_request, 0, 0, 7);
 
@@ -2220,13 +2220,14 @@ TEST_P(CoordinationTest, TestListRequestTypes)
         return create_response.path_created;
     };
 
-    create_path(parentPath(StringRef{test_path}).toString(), false, false);
+    create_path(std::string{parentPath(test_path)}, false, false);
 
     static constexpr size_t persistent_num = 5;
     std::unordered_set<std::string> expected_persistent_children;
     for (size_t i = 0; i < persistent_num; ++i)
     {
-        expected_persistent_children.insert(getBaseName(create_path(test_path, false)).toString());
+        auto created_path = create_path(test_path, false);
+        expected_persistent_children.insert(std::string{getBaseName(created_path)});
     }
     ASSERT_EQ(expected_persistent_children.size(), persistent_num);
 
@@ -2234,7 +2235,8 @@ TEST_P(CoordinationTest, TestListRequestTypes)
     std::unordered_set<std::string> expected_ephemeral_children;
     for (size_t i = 0; i < ephemeral_num; ++i)
     {
-        expected_ephemeral_children.insert(getBaseName(create_path(test_path, true)).toString());
+        auto created_path = create_path(test_path, true);
+        expected_ephemeral_children.insert(std::string{getBaseName(created_path)});
     }
     ASSERT_EQ(expected_ephemeral_children.size(), ephemeral_num);
 
@@ -2242,7 +2244,7 @@ TEST_P(CoordinationTest, TestListRequestTypes)
     {
         const auto list_request = std::make_shared<ZooKeeperFilteredListRequest>();
         int new_zxid = ++zxid;
-        list_request->path = parentPath(StringRef{test_path}).toString();
+        list_request->path = std::string{parentPath(test_path)};
         list_request->list_request_type = list_request_type;
         storage.preprocessRequest(list_request, 1, 0, new_zxid);
         auto responses = storage.processRequest(list_request, 1, new_zxid);
@@ -2532,7 +2534,7 @@ TEST_P(CoordinationTest, TestReapplyingDeltas)
     static constexpr int64_t initial_zxid = 100;
 
     const auto create_request = std::make_shared<ZooKeeperCreateRequest>();
-    create_request->path = "/test/data";
+    create_request->path_view = "/test/data";
     create_request->is_sequential = true;
 
     const auto process_create = [](KeeperStorage & storage, const auto & request, int64_t zxid)
@@ -2548,7 +2550,7 @@ TEST_P(CoordinationTest, TestReapplyingDeltas)
         int64_t zxid = 1;
 
         const auto root_create = std::make_shared<ZooKeeperCreateRequest>();
-        root_create->path = "/test";
+        root_create->path_view = "/test";
         process_create(storage, root_create, zxid);
         ++zxid;
 

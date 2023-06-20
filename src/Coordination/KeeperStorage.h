@@ -116,7 +116,7 @@ public:
         return first.value == second.value;
     }
 
-    static String generateDigest(const String & userdata);
+    static String generateDigest(std::string_view userdata);
 
     struct RequestForSession
     {
@@ -129,7 +129,7 @@ public:
 
     struct AuthID
     {
-        std::string scheme;
+        std::string_view scheme;
         std::string id;
 
         bool operator==(const AuthID & other) const { return scheme == other.scheme && id == other.id; }
@@ -145,7 +145,7 @@ public:
     /// Just vector of SHA1 from user:password
     using AuthIDs = std::vector<AuthID>;
     using SessionAndAuth = std::unordered_map<int64_t, AuthIDs>;
-    using Watches = std::unordered_map<String /* path, relative of root_path */, SessionIDs,  DefaultHash<std::string_view>, TransparentStringEqual>;
+    using Watches = std::unordered_map<String /* path, relative of root_path */, SessionIDs, DefaultHash<std::string_view>, TransparentStringEqual>;
 
     int64_t session_id_counter{1};
 
@@ -218,15 +218,15 @@ public:
 
     struct Delta
     {
-        Delta(std::string_view path_, int64_t zxid_, Operation operation_, std::string path_storage_ = "")
+        Delta(std::string_view path_, int64_t zxid_, Operation operation_, std::shared_ptr<std::string> path_storage_ = nullptr)
             : path(std::move(path_)), path_storage(std::move(path_storage_)), zxid(zxid_), operation(std::move(operation_))
         {
         }
 
         Delta(std::string path_, int64_t zxid_, Operation operation_)
-            : path_storage(std::move(path_)), zxid(zxid_), operation(std::move(operation_))
+            : path_storage(std::make_shared<std::string>(std::move(path_))), zxid(zxid_), operation(std::move(operation_))
         {
-            path = path_storage;
+            path = *path_storage;
         }
 
         Delta(int64_t zxid_, Coordination::Error error) : Delta(std::string_view{""}, zxid_, ErrorDelta{error}) { }
@@ -234,7 +234,7 @@ public:
         Delta(int64_t zxid_, Operation subdelta) : Delta(std::string_view{""}, zxid_, subdelta) { }
 
         std::string_view path;
-        std::string path_storage;
+        std::shared_ptr<std::string> path_storage;
         int64_t zxid;
         Operation operation;
     };

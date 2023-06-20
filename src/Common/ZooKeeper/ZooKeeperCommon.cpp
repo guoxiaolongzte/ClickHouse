@@ -14,7 +14,7 @@
 namespace Coordination
 {
 
-namespace 
+namespace
 {
 
 void readStringUsingBufferMemory(std::string_view & s, ReadBuffer & in)
@@ -38,7 +38,7 @@ void readStringUsingBufferMemory(std::string_view & s, ReadBuffer & in)
     if (available < static_cast<size_t>(size))
         throw Exception(
             Error::ZMARSHALLINGERROR, "Buffer size read from Zookeeper is not big enough. Expected {}. Got {}", size, available);
-    
+
     s = std::string_view{in.position(), static_cast<size_t>(size)};
     in.ignore(size);
 }
