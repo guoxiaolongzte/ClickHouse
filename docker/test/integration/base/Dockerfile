@@ -42,7 +42,7 @@ ARG TARGETARCH
 # For reference https://downloads.mysql.com/archives/c-odbc/ RHEL
 RUN arch=${TARGETARCH:-amd64} \
   && case $arch in \
-      amd64) rarch=x86-64 ;; \
+      amd64) rarch=x86_64 ;; \
       arm64) rarch=aarch64 ;; \
     esac \
   && cd /tmp \
